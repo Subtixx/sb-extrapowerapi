@@ -12,29 +12,29 @@ function energy.init(args)
   --can be used to disallow direct connection (e.g. for batteries)
   energy.allowConnection = args["energyAllowConnection"]
   if energy.allowConnection == nil then
-    energy.allowConnection = entity.configParameter("energyAllowConnection")
+    energy.allowConnection = config.getParameter("energyAllowConnection")
     if energy.allowConnection == nil then
       energy.allowConnection = true
     end
   end
 
   --capacity of internal energy storage
-  energy.capacity = args["energyCapacity"] or entity.configParameter("energyCapacity") or 0
+  energy.capacity = args["energyCapacity"] or config.getParameter("energyCapacity") or 0
 
   --amount of energy generated per second when active
-  energy.generationRate = args["energyGenerationRate"] or entity.configParameter("energyGenerationRate") or 0
+  energy.generationRate = args["energyGenerationRate"] or config.getParameter("energyGenerationRate") or 0
 
   --amount of energy consumed per second when active
-  energy.consumptionRate = args["energyConsumptionRate"] or entity.configParameter("energyConsumptionRate") or 0
+  energy.consumptionRate = args["energyConsumptionRate"] or config.getParameter("energyConsumptionRate") or 0
 
   --current energy storage
-  storage.curEnergy = storage.curEnergy or entity.configParameter("savedEnergy") or  0
+  storage.curEnergy = storage.curEnergy or config.getParameter("savedEnergy") or  0
 
   --maximum amount of energy transmitted per second
-  energy.sendRate = args["energySendRate"] or entity.configParameter("energySendRate") or 0
+  energy.sendRate = args["energySendRate"] or config.getParameter("energySendRate") or 0
 
   --frequency (in seconds) to push energy (maybe make this hard coded)
-  energy.sendFreq = args["energySendFreq"] or entity.configParameter("energySendFreq") or 0.5
+  energy.sendFreq = args["energySendFreq"] or config.getParameter("energySendFreq") or 0.5
 
   --timer variable that tracks the cooldown until next transmission pulse
   energy.sendTimer = energy.sendFreq
@@ -46,12 +46,12 @@ function energy.init(args)
 
   --define custom source position for energy projectiles and LoS checks
   --NOTE: making this too far from the object's position will result in strange behavior (as it is not used in the initial queries for nearby objects)
-  local nodeOffset = args["energyNodeOffset"] or entity.configParameter("energyNodeOffset") or {0.5, 0.5}
+  local nodeOffset = args["energyNodeOffset"] or config.getParameter("energyNodeOffset") or {0.5, 0.5}
   energy.nodePosition = {entity.position()[1] + nodeOffset[1], entity.position()[2] + nodeOffset[2]}
 
   --maximum range (in blocks) that this device will search for entities to connect to
   --NOTE: we may not want to make this configurable, since it will result in strange behavior if asymmetrical
-  energy.linkRange = args["energyLinkRange"] or entity.configParameter("energyLinkRange") or 10
+  energy.linkRange = args["energyLinkRange"] or config.getParameter("energyLinkRange") or 10
 
   --frequency (in seconds) to perform LoS checks on connected entities
   energy.connectCheckFreq = 0.5
@@ -71,11 +71,11 @@ function energy.init(args)
 end
 
 -- Performs per-tick updates for energy module (MUST BE CALLED IN OBJECT main() FUNCTION)
-function energy.update()
+function energy.update(dt)
   if self.energyInitialized then
     --periodically reset projectile anti-spam list
     if energy.transferCooldown > 0 then
-      energy.transferCooldown = energy.transferCooldown - entity.dt()
+      energy.transferCooldown = energy.transferCooldown - dt
       if energy.transferCooldown <= 0 then
         energy.transferShown = {}
         energy.transferCooldown = energy.transferInterval
@@ -84,7 +84,7 @@ function energy.update()
 
     --periodic energy transmission pulses
     if energy.sendRate > 0 then
-      energy.sendTimer = energy.sendTimer - entity.dt()
+      energy.sendTimer = energy.sendTimer - dt
       while energy.sendTimer <= 0 do
         local energyToSend = math.min(energy.getAvailableEnergy(), energy.sendRate * energy.sendFreq)
         if energyToSend > 0 then
@@ -95,14 +95,14 @@ function energy.update()
     end
 
     --periodic connection checks
-    energy.connectCheckTimer = energy.connectCheckTimer - entity.dt()
+    energy.connectCheckTimer = energy.connectCheckTimer - dt
     if energy.connectCheckTimer <= 0 then
       energy.checkConnections()
       energy.connectCheckTimer = energy.connectCheckFreq
     end
   else
     -- create table of locations this object occupies, which will be ignored in LoS checks
-    local collisionBlocks = entity.configParameter("energyCollisionBlocks", nil)
+    local collisionBlocks = config.getParameter("energyCollisionBlocks", nil)
     if collisionBlocks then
       energy.collisionBlocks = {}
       local pos = entity.position()
@@ -165,8 +165,8 @@ end
 
 -- adds the appropriate periodic energy generation based on energyGenerationRate and scriptDelta
 -- @returns amount of energy generated
-function energy.generateEnergy()
-  local amount = energy.generationRate * entity.dt()
+function energy.generateEnergy(dt)
+  local amount = energy.generationRate * dt
   --world.logInfo("generating %f energy", amount)
   return energy.addEnergy(amount)
 end
@@ -203,9 +203,9 @@ end
 --     as determined by energyConsumptionRate and scriptDelta
 -- @param testConsume (optional) if true, will not actually consume energy
 -- @returns false if there is insufficient energy stored (and does not remove energy)
-function energy.consumeEnergy(amount, testConsume)
+function energy.consumeEnergy(dt, amount, testConsume)
   if amount == nil then
-    amount = energy.consumptionRate * entity.dt()
+    amount = energy.consumptionRate * dt
   end
   --world.logInfo("consuming %f energy", amount)
   if amount <= energy.getEnergy() then
@@ -245,9 +245,9 @@ function energy.makeConnectionConfig(entityId)
   --config.blocked = world.lineCollision(srcPos, tarPos) -- world.lineCollision is marginally faster
   config.isRelay = world.callScriptedEntity(entityId, "energy.isRelay")
   -- if config.isRelay then
-  --   world.logInfo("%s %d thinks %d is a relay", entity.configParameter("objectName"), entity.id(), entityId)
+  --   world.logInfo("%s %d thinks %d is a relay", config.getParameter("objectName"), entity.id(), entityId)
   -- else
-  --   world.logInfo("%s %d thinks %d is NOT a relay", entity.configParameter("objectName"), entity.id(), entityId)
+  --   world.logInfo("%s %d thinks %d is NOT a relay", config.getParameter("objectName"), entity.id(), entityId)
   -- end
   return config
 end
@@ -339,7 +339,7 @@ function energy.onConnect(entityId)
   -- if self.energyInitialized then
     energy.addToConnectionTable(entityId)
   -- else
-  --   world.logInfo("%s %d wasn't initialized at connection time! hopefully we'll connect later...", entity.configParameter("objectName"), entity.id())
+  --   world.logInfo("%s %d wasn't initialized at connection time! hopefully we'll connect later...", config.getParameter("objectName"), entity.id())
   -- end
 end
 
@@ -352,7 +352,7 @@ function energy.removeFromConnectionTable(entityId)
       break
     end
   end
-  -- world.logInfo("%s %d disconnected from %d:", entity.configParameter("objectName"), entity.id(), entityId)
+  -- world.logInfo("%s %d disconnected from %d:", config.getParameter("objectName"), entity.id(), entityId)
   -- world.logInfo(energy.sortedConnections)
 end
 
@@ -389,9 +389,9 @@ function energy.findConnections()
     energy.connect(entityId)
   end
 
-  -- world.logInfo("%s %d found %d entities within range:", entity.configParameter("objectName"), entity.id(), #entityIds)
-  -- world.logInfo(entityIds)
-  -- world.logInfo(energy.sortedConnections)
+  --sb.logInfo(string.format("%s %d found %d entities within range:", config.getParameter("objectName"), sb.print(entity.id()), #entityIds))
+  --sb.logInfo(sb.print(entityIds))
+  --sb.logInfo(sb.print(energy.sortedConnections))
 end
 
 -- performs periodic LoS checks on connected entities
@@ -434,7 +434,7 @@ function energy.energyNeedsQuery(energyNeeds)
       end
       
       -- if energyNeeds[tostring(entityId)] == nil then
-      --   world.logInfo("%s %d failed to add itself to energyNeeds table", world.callScriptedEntity(entityId, "entity.configParameter", "objectName"), entityId)
+      --   world.logInfo("%s %d failed to add itself to energyNeeds table", world.callScriptedEntity(entityId, "config.getParameter", "objectName"), entityId)
       -- end
       
       if energyNeeds["total"] > prevTotal then
@@ -448,7 +448,7 @@ end
 
 -- callback for receiving incoming energy pulses
 function energy.receiveEnergy(amount)
-  --world.logInfo("%s %d receiving %d energy...", entity.configParameter("objectName"), entity.id(), amount)
+  --world.logInfo("%s %d receiving %d energy...", config.getParameter("objectName"), entity.id(), amount)
   if onEnergyReceived then
     return onEnergyReceived(amount)
   else
@@ -458,8 +458,8 @@ end
 
 -- pushes energy to connected entities. amount is divided "fairly" between the valid receivers
 function energy.sendEnergy(amount)
-  --if entity.configParameter("objectName") ~= "relay" then
-    --world.logInfo("%s %d sending %f energy...", entity.configParameter("objectName"), entity.id(), amount)
+  --if config.getParameter("objectName") ~= "relay" then
+    --world.logInfo("%s %d sending %f energy...", config.getParameter("objectName"), entity.id(), amount)
   --end
 
   -- get the network's energy needs
@@ -501,7 +501,7 @@ function energy.sendEnergy(amount)
   --call hook for objects to update animations, etc
   if onEnergySend then onEnergySend(totalSent) end
 
-  -- world.logInfo("%s %d successfully sent %d energy", entity.configParameter("objectName"), entity.id(), totalSent)
+  -- world.logInfo("%s %d successfully sent %d energy", config.getParameter("objectName"), entity.id(), totalSent)
 end
 
 -- display a visual indicator of the energy transfer
